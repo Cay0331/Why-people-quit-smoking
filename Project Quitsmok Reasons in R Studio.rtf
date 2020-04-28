@@ -1,0 +1,136 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2511
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 ArialMT;\f1\froman\fcharset0 Times-Roman;}
+{\colortbl;\red255\green255\blue255;\red0\green0\blue0;}
+{\*\expandedcolortbl;;\cssrgb\c0\c0\c0;}
+\margl1440\margr1440\vieww10800\viewh8400\viewkind0
+\deftab720
+\pard\pardeftab720\sl400\partightenfactor0
+
+\f0\fs29\fsmilli14667 \cf2 \expnd0\expndtw0\kerning0
+# Tobacco data\
+rm(list=ls())\
+\
+# First step to make data available for regession analysis\
+gse <- read_sas("https://bigblue.depaul.edu/jlee141/econdata/health_data/NATS/nats_2013_finalcpl_6_weighted.sas7bdat")\
+str(gse)\
+\
+# Create clean indata by dropping some category data for simulations\
+indata <- subset(gse,select=c(age,genhealth,smoknow,educa2_r,income2,HOMERULES2_R,phone_type,\
+                              marital2,gender,employ2,housingtype,promo1,promo2,promo3,promo4,\
+                             buywhere,COSTCARTON2_R,COSTPACK2_R,raceethnic,raceethnic_r))\
+str(indata)\
+\
+indata$quitsmok <- ifelse(indata$smoknow == "3",1,0)\
+\
+#Descriptive Statistics \
+summary(indata$age)\
+summary(indata$genhealth)\
+table(indata$genhealth)\
+summary(indata$HOMERULES2_R)\
+table(indata$HOMERULES2_R)\
+summary(indata$educa2_r)\
+table(indata$educa2_r)\
+\
+# Analysis of Covariance\
+fit <- aov(quitsmok ~ genhealth + educa2_r + age + HOMERULES2_R, data=indata)\
+summary(fit)\
+\
+# set.seed(1963260)\
+train_idx <- sample(nrow(indata),round(0.8*nrow(indata)))\
+train <- indata[train_idx,]\
+test <- indata[-train_idx,]\
+str(test)\
+str(train)\
+\
+# neural network \
+# Standarize the data -- Min Max will change all variables to scale to (0,1)\
+source("/var/www/html/jlee141/econdata/R/func_lib.R")\
+zindata <- min_max_nor(indata)\
+summary(indata)\
+summary(zindata)\
+\
+# Train and Test Data\
+set.seed(1963260)\
+train_ind <- sample(nrow(indata),round(0.8*nrow(indata)))\
+ztrain <- indata[train_ind,]\
+ztest <- indata[-train_ind,]\
+# Neural Network Model\
+library(neuralnet)\
+nnet1 <- neuralnet(age~.,data=ztrain,linear.output =FALSE,hidden=c(2))\
+plot(nnet1)\
+pnnet1 <- predict(nnet1,newdata=ztest)\
+\
+library(neuralnet)\
+nnet2 <- neuralnet(age~.,data=ztrain,linear.output =FALSE,hidden=c(5,2))\
+plot(nnet2)\
+pnnet2 <- predict(nnet2,newdata=ztest)\
+\
+library(neuralnet)\
+nnet3 <- neuralnet(age~.,data=ztrain,linear.output =FALSE,hidden=c(7,5,2))\
+plot(nnet3)\
+pnnet3 <- predict(nnet3,newdata=ztest)\
+\
+ytest <- as.numeric(test$quitsmok) - 1\
+rmse1 <- (mean(ei1^2))^0.5\
+rmse2 <- (mean(ei2^2))^0.5\
+rmse3 <- (mean(ei3^2))^0.5\
+print\
+fit_eval(pnnet1,ytest,"pnnet 1")\
+fit_eval(pnnet2,ytest,"pnnet 2")\
+fit_eval(pnnet3,ytest,"pnnet 3")\
+bestnnet <- pnnet1\
+\
+# linear regression\
+library(haven)\
+ols1 <- lm(quitsmok~.,data=train)\
+ols2 <- step(lm(quitsmok~.,data=train),direction = "both")\
+ols3 <- lm(quitsmok~promo1+promo2+promo3+promo4+income2+educa2_r+HOMERULES2_R\
+           ,data=train)\
+pols1 <- predict(ols1,newdata=test)\
+pols2 <- predict(ols2,newdata=test)\
+pols3 <- predict(ols3,newdata=test)\
+ytest <- test$quitsmok\
+ei1 <- ytest - pols1\
+ei2 <- ytest - pols2\
+ei3 <- ytest - pols3\
+rmse1 <- (mean(ei1^2))^0.5\
+rmse2 <- (mean(ei2^2))^0.5\
+rmse3 <- (mean(ei3^2))^0.5\
+print\
+fit_eval(pols1,ytest,"OLS 1")\
+fit_eval(pols2,ytest,"OLS 2")\
+fit_eval(pols3,ytest,"OLS 3")\
+bestols <- pols2\
+\
+# random forest \
+train$quitsmok <- as.factor(train$quitsmok)\
+test$quitsmok <- as.factor(test$quitsmok)\
+randf1 <- randomForest(quitsmok~.,data=train, mtry=10,ntree=1000)\
+prand1 <- predict(randf1,newdata=test,type="prob")\
+prand1 <- prand1[,2] \
+randf2 <- randomForest(quitsmok~.,data=train, mtry=10,ntree=500)\
+prand2 <- predict(randf2,newdata=test,type="prob")\
+prand2 <- prand2[,2]\
+randf3 <- randomForest(quitsmok~., data=train,mtry=15,ntree=500)\
+prand3 <- predict(randf3,newdata=test,type="prob")\
+prand3 <- prand3[,2]\
+ytest <- as.numeric(test$quitsmok) - 1\
+\
+fit_eval(prand1,ytest,"RF 1")\
+fit_eval(prand2,ytest,"RF 2")\
+fit_eval(prand2,ytest,"RF 3")\
+bestrandf <- prand1\
+\
+#test the results\
+fit_eval(bestols,ytest, "Linear Regression ")\
+fit_eval(bestrandf,ytest,"RandomForest Model")\
+fit_eval(bestnnet,ytest, "Neural NetworkReg ")\
+\
+#save in bigblue\
+saveRDS(bestols,"./quitsmok_ols_final_project.RDS")\
+saveRDS(bestrandf,"./quitsmok_randf_final_project.RDS")\
+saveRDS(bestnnet,"./quitsmok_nnet_final_project.RDS")\
+\pard\pardeftab720\sl340\partightenfactor0
+
+\f1\fs24 \cf2 \
+}
